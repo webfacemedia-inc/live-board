@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Live Board — realtime on webface.cloud</title>
+<meta name="description" content="A realtime board running on webface.cloud — every message streams live to every open browser.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="icon" href="https://webface.cloud/static/logo.svg" type="image/svg+xml">
+<script src="./pocketbase.umd.js"></script>
+<style>
+  :root{--bg:#0a0c10;--panel:#11141b;--panel2:#171b24;--line:#1f2530;--line2:#2a3242;
+    --text:#ecf0f6;--muted:#8a93a5;--dim:#5b6575;--accent:#3499cc;--ok:#3fcf8e;--err:#f26d6d}
+  *{box-sizing:border-box;margin:0}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(560px 380px at 50% -10%,rgba(52,153,204,.13),transparent 70%)}
+
+  header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;height:56px;
+    padding:0 max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line);
+    background:rgba(10,12,16,.82);backdrop-filter:blur(12px)}
+  header img{height:22px}
+  header h1{font-size:15px;font-weight:650;letter-spacing:-.01em}
+  header h1 span{color:var(--accent)}
+  .live{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ok);
+    background:rgba(63,207,142,.09);border:1px solid rgba(63,207,142,.2);padding:3px 11px;border-radius:99px}
+  .live i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.8s infinite}
+  .live.off{color:var(--muted);background:rgba(138,147,165,.08);border-color:rgba(138,147,165,.16)}
+  @keyframes pulse{50%{opacity:.3}}
+  .who{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .who button{background:none;border:1px solid var(--line2);color:var(--muted);border-radius:7px;
+    padding:4px 10px;font-size:12px;cursor:pointer}
+
+  main{flex:1;width:100%;max-width:640px;margin:0 auto;padding:18px max(16px,env(safe-area-inset-left)) 120px;position:relative}
+
+  .msg{display:flex;gap:11px;margin:14px 0;animation:in .28s cubic-bezier(.2,.9,.3,1.2)}
+  @keyframes in{from{transform:translateY(10px);opacity:0}}
+  .av{width:34px;height:34px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+    font-size:13px;font-weight:700;color:#fff;letter-spacing:-.02em}
+  .msg .body{min-width:0}
+  .msg .meta{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+  .msg .who2{font-size:13px;font-weight:650}
+  .msg .when{font-size:11px;color:var(--dim)}
+  .msg .text{background:var(--panel);border:1px solid var(--line);border-radius:4px 14px 14px 14px;
+    padding:9px 13px;font-size:14px;line-height:1.5;word-break:break-word;display:inline-block}
+  .empty{text-align:center;color:var(--dim);padding:60px 20px;font-size:13.5px}
+
+  .bar{position:fixed;bottom:0;left:0;right:0;z-index:10;padding:12px max(16px,env(safe-area-inset-left))
+    calc(12px + env(safe-area-inset-bottom));background:rgba(10,12,16,.88);backdrop-filter:blur(12px);
+    border-top:1px solid var(--line)}
+  .bar .inner{max-width:640px;margin:0 auto;display:flex;gap:9px}
+  .bar input{flex:1;background:var(--panel2);border:1px solid var(--line2);color:var(--text);
+    padding:0 15px;height:42px;border-radius:12px;font-size:16px;min-width:0}
+  .bar input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(52,153,204,.16)}
+  .bar button{background:var(--accent);color:#fff;border:0;border-radius:12px;height:42px;padding:0 18px;
+    font-weight:650;font-size:14px;cursor:pointer}
+  .bar button:disabled{opacity:.5}
+
+  .gate{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:rgba(10,12,16,.7);backdrop-filter:blur(6px);padding:18px}
+  .gate.hidden{display:none}
+  .gate .box{background:var(--panel);border:1px solid var(--line2);border-radius:18px;padding:28px;
+    width:100%;max-width:360px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+  .gate img{height:36px;margin-bottom:14px}
+  .gate h2{font-size:18px;letter-spacing:-.02em;margin-bottom:4px}
+  .gate p{color:var(--muted);font-size:13px;margin-bottom:18px;line-height:1.55}
+  .gate input{width:100%;background:var(--panel2);border:1px solid var(--line2);color:var(--text);
+    padding:0 13px;height:42px;border-radius:10px;font-size:16px;margin-bottom:9px}
+  .gate input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(52,153,204,.16)}
+  .gate .go{width:100%;height:42px;border:0;border-radius:10px;background:var(--accent);color:#fff;
+    font-weight:650;font-size:14px;cursor:pointer}
+  .gate .gbtn{width:100%;height:42px;border:1px solid var(--line2);border-radius:10px;background:#fff;
+    color:#1f1f1f;font-weight:600;font-size:14px;cursor:pointer;display:flex;align-items:center;
+    justify-content:center;gap:9px;margin-bottom:14px}
+  .div{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:11px;margin:2px 0 12px;
+    text-transform:uppercase;letter-spacing:.08em}
+  .div::before,.div::after{content:"";flex:1;height:1px;background:var(--line)}
+  .err{color:var(--err);font-size:12.5px;min-height:17px;margin-top:8px}
+  .foot{margin-top:16px;font-size:11.5px;color:var(--dim);text-align:center}
+  .foot a{color:var(--muted);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <img src="https://webface.cloud/static/logo.svg" alt="">
+  <h1>Live <span>Board</span></h1>
+  <div class="live off" id="livePill"><i></i><span id="liveLbl">connecting</span></div>
+  <div class="who" id="who"></div>
+</header>
+
+<main>
+  <div id="feed"><div class="empty">Loading the board…</div></div>
+</main>
+
+<div class="bar" id="bar" style="display:none">
+  <div class="inner">
+    <input id="text" placeholder="Say something…" maxlength="500" autocomplete="off">
+    <button id="send">Send</button>
+  </div>
+</div>
+
+<div class="gate" id="gate">
+  <form class="box" id="gateForm">
+    <img src="https://webface.cloud/static/logo.svg" alt="">
+    <h2>Join the board</h2>
+    <p>Messages appear for everyone, instantly — this page is a live view of a realtime database on webface.cloud.</p>
+    <button type="button" class="gbtn" id="googleBtn">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.7l6.2 5.2C41.4 35.4 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+      Continue with Google
+    </button>
+    <div class="div">or with email</div>
+    <input type="email" id="em" placeholder="you@company.com" autocomplete="username">
+    <input type="password" id="pw" placeholder="password" autocomplete="current-password">
+    <button class="go" type="submit">Sign in</button>
+    <div class="err" id="gateErr"></div>
+    <div class="foot">Watching is open to everyone — <a href="#" id="watchLink">just watch</a> · runs on <a href="https://webface.cloud">webface.cloud</a></div>
+  </form>
+</div>
+
+<script>
+const pb = new PocketBase('/');
+const feed = document.getElementById('feed'), gate = document.getElementById('gate'),
+      bar = document.getElementById('bar'), text = document.getElementById('text'),
+      who = document.getElementById('who'), pill = document.getElementById('livePill'),
+      lbl = document.getElementById('liveLbl');
+
+const HUES = [204, 262, 12, 152, 32, 330, 88, 226];
+function hue(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return HUES[h%HUES.length]}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function initials(n){return (n||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase()}
+
+function row(m){
+  const name = m.author_name || 'someone';
+  return `<div class="msg">
+    <div class="av" style="background:hsl(${hue(name)} 55% 46%)">${esc(initials(name))}</div>
+    <div class="body">
+      <div class="meta"><span class="who2">${esc(name)}</span>
+      <span class="when">${new Date(m.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div>
+      <div class="text">${esc(m.content)}</div>
+    </div></div>`;
+}
+
+async function load(){
+  try{
+    const res = await pb.collection('messages').getList(1, 60, { sort: '-created' });
+    feed.innerHTML = res.items.length
+      ? res.items.reverse().map(row).join('')
+      : '<div class="empty">Nothing yet — say the first thing.</div>';
+    window.scrollTo(0, document.body.scrollHeight);
+  }catch(e){ feed.innerHTML = '<div class="empty">Could not load the board.</div>'; }
+}
+
+async function connect(){
+  try{
+    await pb.collection('messages').subscribe('*', e => {
+      if (e.action !== 'create') return;
+      if (feed.querySelector('.empty')) feed.innerHTML = '';
+      feed.insertAdjacentHTML('beforeend', row(e.record));
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    pill.classList.remove('off'); lbl.textContent = 'live';
+  }catch(e){ lbl.textContent = 'offline'; }
+}
+
+function ui(){
+  const authed = pb.authStore.isValid;
+  gate.classList.toggle('hidden', authed);
+  bar.style.display = authed ? '' : 'none';
+  who.innerHTML = authed
+    ? `<span>${esc(pb.authStore.record.name || pb.authStore.record.email)}</span><button id="out">Sign out</button>`
+    : '';
+  const out = document.getElementById('out');
+  if (out) out.onclick = () => { pb.authStore.clear(); ui(); };
+}
+
+document.getElementById('googleBtn').onclick = async () => {
+  const err = document.getElementById('gateErr'); err.textContent = '';
+  try {
+    const auth = await pb.collection('users').authWithOAuth2({ provider: 'google' });
+    if (!auth.record.name && auth.meta?.name)
+      await pb.collection('users').update(auth.record.id, { name: auth.meta.name });
+    ui();
+  } catch (e) { err.textContent = 'Google sign-in is not enabled yet on this board.'; }
+};
+
+document.getElementById('gateForm').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const err = document.getElementById('gateErr'); err.textContent = '';
+  try {
+    await pb.collection('users').authWithPassword(
+      document.getElementById('em').value.trim(), document.getElementById('pw').value);
+    ui();
+  } catch (e) { err.textContent = 'Wrong email or password.'; }
+  return false;
+};
+document.getElementById('watchLink').onclick = (e) => { e.preventDefault(); gate.classList.add('hidden'); };
+
+async function send(){
+  const v = text.value.trim(); if (!v || !pb.authStore.isValid) return;
+  text.value = '';
+  await pb.collection('messages').create({
+    content: v, author: pb.authStore.record.id,
+    author_name: pb.authStore.record.name || pb.authStore.record.email.split('@')[0]
+  });
+}
+document.getElementById('send').onclick = send;
+text.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+load(); connect(); ui();
+</script>
+</body>
+</html>
